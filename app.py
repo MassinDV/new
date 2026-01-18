@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify, Response
 import json
 import os
@@ -17,6 +16,83 @@ USERNAME = "test"
 PASSWORD = "test"
 EXP_DATE = "2524608000"  # ~2050
 
+# ================== Dynamic Source Configuration ==================
+# URLs for source configuration files
+SOURCE_CONFIG_URLS = {
+    "json": "https://dl.dropboxusercontent.com/scl/fi/y1ouv76258xw02uiwo5nb/Forja-data.json?rlkey=ob5wfl9mimu6plb89jx371phc&st=18256iva&dl=0",
+    "txt": "https://dl.dropboxusercontent.com/scl/fi/tlm6qn8ur3rwd5geueg5v/Forja-data.txt?rlkey=7vxduuzdz93b3h0bwq0i0tukh&st=awypp6ds&dl=0"
+}
+
+def load_sources_from_config():
+    """Load source URLs from external configuration files"""
+    movie_sources = []
+    series_sources = []
+    channel_sources = []
+    
+    # Try JSON format first
+    try:
+        resp = requests.get(SOURCE_CONFIG_URLS["json"], timeout=20)
+        resp.raise_for_status()
+        config = resp.json()
+        
+        # Extract sources from JSON structure
+        if "movie_sources" in config:
+            movie_sources = [{"type": "remote", "url": url} for url in config["movie_sources"]]
+        if "series_sources" in config:
+            series_sources = [{"type": "remote", "url": url} for url in config["series_sources"]]
+        if "channel_sources" in config:
+            channel_sources = [{"type": "remote", "url": url} for url in config["channel_sources"]]
+        
+        print(f"[CONFIG] Loaded from JSON: {len(movie_sources)} movies, {len(series_sources)} series, {len(channel_sources)} channels")
+        return movie_sources, series_sources, channel_sources
+    except Exception as e:
+        print(f"[CONFIG] JSON load failed: {e}, trying TXT format...")
+    
+    # Fallback to TXT format
+    try:
+        resp = requests.get(SOURCE_CONFIG_URLS["txt"], timeout=20)
+        resp.raise_for_status()
+        content = resp.text
+        
+        # Parse text file by sections
+        current_section = None
+        for line in content.split('\n'):
+            line = line.strip()
+            
+            # Identify sections
+            if "MOVIE SOURCES" in line.upper():
+                current_section = "movies"
+                continue
+            elif "SERIES" in line.upper() and "SOURCES" in line.upper():
+                current_section = "series"
+                continue
+            elif "CHANNEL SOURCES" in line.upper():
+                current_section = "channels"
+                continue
+            
+            # Extract URLs (lines starting with http)
+            if line.startswith("http"):
+                source_entry = {"type": "remote", "url": line}
+                
+                if current_section == "movies":
+                    movie_sources.append(source_entry)
+                elif current_section == "series":
+                    series_sources.append(source_entry)
+                elif current_section == "channels":
+                    channel_sources.append(source_entry)
+        
+        print(f"[CONFIG] Loaded from TXT: {len(movie_sources)} movies, {len(series_sources)} series, {len(channel_sources)} channels")
+        return movie_sources, series_sources, channel_sources
+    except Exception as e:
+        print(f"[CONFIG] TXT load failed: {e}")
+    
+    # Return empty lists if both fail
+    print("[CONFIG] Warning: Could not load any sources from config files")
+    return [], [], []
+
+# Load sources dynamically at startup
+MOVIE_SOURCES, SERIES_SOURCES, CHANNEL_SOURCES = load_sources_from_config()
+
 def safe_strip(value):
     """Safely strip whitespace from strings"""
     return (value or "").strip()
@@ -33,32 +109,6 @@ def clean_category_name(name):
     # Capitalize properly
     return name.strip().title()
 
-# ================== Modern flexible sources ==================
-MOVIE_SOURCES = [
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/anmkp7ztbkjxslqvzaw3l/Action_Movies.json?rlkey=ia7r4hq4o0akwqtb7xy8o485v&st=a2elo1rp&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/q4gs5d0xyqx0i2krqbqr4/Comedy_Movies.json?rlkey=5iw3hxcsnl3o353zr6ecfw56t&st=gglobs9h&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/4q22ebqcs3wrin2he9lts/Drama_Movies.json?rlkey=45yp43ippbhe5yx9120buiujw&st=gjyh5vgl&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/v9o7ntpjre62zmzrgusl0/History_Movies.json?rlkey=k7anbrlxayvi3gr2bbtjgxa8e&st=1umy1i0q&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/xod6zd7sh3jjoqiwuds7b/Theater.json?rlkey=2if8tq415k78gv9q0sy3osm8p&st=c8g5idkd&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/di2louytksj2hbz1lhqs7/Maraya-Movies.json?rlkey=1y3g0cwxhwpso4t0g2mw3eu5r&st=owkbn2tn&dl=0"},
-]
-
-SERIES_SOURCES = [
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/sig0lvfidcukkhdztzb0f/Action.json?rlkey=rqi6t0jzyk2otdir4ddqp67kf&st=uoame5s3&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/7i18ox5i9zkszo4a4ejqt/Comedy.json?rlkey=zqv7m9fd5z80rt3e56sw8dc6l&st=lljktsfq&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/ss4gle59atuie8u4puel4/Docs.json?rlkey=3kh3gyps6u03m9jzy3qy3wahj&st=rvvuheku&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/gisf3g8r31loy587pdbks/Drama.json?rlkey=rhvo8gf8dwzedfpsd1kmysanw&st=4nob51g5&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/2ljf0hhrlf6zqwql8s6t0/Entertainment.json?rlkey=dmojuor01y0kzj8kps04xwk80&st=uoblnfxi&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/r5ysbci3ckdn01j1ectaq/History.json?rlkey=31dgj9u96x6cm3e0o4bjiqfp3&st=6768duj7&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/k2muxn06eto0oocmisqrv/Kids.json?rlkey=ozkebwb6zlfocva3f94w4ug33&st=qx8z5rf0&dl=0"},
-]
-
-CHANNEL_SOURCES = [
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/nif6tfgy11zrg3cb2aqp3/channels-data.json?rlkey=sf0giv93ia727iz7tc0n0o3bf&st=0h23nvn0&dl=0"},
-    {"type": "remote", "url": "https://dl.dropboxusercontent.com/scl/fi/sv327hjunx9g37ang22bf/mbc.json?rlkey=ni8m9f8fqjw40jj7fb85l26zy&st=rq7ujvfr&dl=0"},
-]
-
-# ================== Helper functions ==================
 def get_category_from_source(source_dict, data=None):
     """Extract and clean category name from source or data"""
     # First check if data has a Category field
@@ -112,7 +162,7 @@ def fetch_tmdb_details(title, is_movie=True):
     http = urllib3.PoolManager()
 
     try:
-        search_url = f"https://api.themoviedb.org/3/search/{media_type}?api_key={api_key}&query={quote(title)}"
+        search_url = f"https://api.themovedb.org/3/search/{media_type}?api_key={api_key}&query={quote(title)}"
         resp = http.request('GET', search_url, timeout=5.0)
         if resp.status != 200:
             return None
@@ -569,121 +619,6 @@ def player_api():
                         "cast": cast_str,
                         "director": str(m["director"]),
                         "genre": genre_str,
-                        "releasedate": m["year"],
-                        "year": m["year"],
-                        "rating": str(m["rating"]),
-                        "duration": m.get("duration", ""),
-                        "country": m.get("country", "Morocco"),
-                        "tmdb_id": str(m.get("tmdb_id") or m["id"])
-                    },
-                    "movie_data": {
-                        "stream_id": m["id"],
-                        "name": m["title"],
-                        "container_extension": "mp4",
-                        "custom_sid": str(m["id"])
-                    }
-                })
-
-        return jsonify({"info": {}, "movie_data": {}})
-
-    # Series Categories
-    if action == "get_series_categories":
-        series_list = load_series()
-        unique_cats = sorted(set(s["category"] for s in series_list))
-        return jsonify([{"category_id": str(i + 1000), "category_name": cat, "parent_id": 0} 
-                       for i, cat in enumerate(unique_cats)])
-
-    # Series List
-    if action == "get_series":
-        series_list = load_series()
-        unique_cats = sorted(set(s["category"] for s in series_list))
-        cat_map = {cat: str(i + 1000) for i, cat in enumerate(unique_cats)}
-        result = []
-
-        for s in series_list:
-            genre_str = ", ".join(s["genre"]) if isinstance(s["genre"], list) else ""
-            cast_str = ", ".join(s["cast"]) if isinstance(s["cast"], list) else ""
-
-            result.append({
-                "series_id": s["id"],
-                "num": s["id"],
-                "name": s["title"],
-                "title": s["title"],
-                "cover": s["cover"],
-                "cover_big": s["banner"],
-                "backdrop_path": [s["banner"]] if s["banner"] else [],
-                "plot": s["plot"],
-                "overview": s["plot"],
-                "cast": cast_str,
-                "director": s.get("director", ""),
-                "genre": genre_str,
-                "releaseDate": s["year"],
-                "year": s["year"],
-                "rating": s["rating"],
-                "rating_5based": str(float(s["rating"]) / 2) if s["rating"] != "0" else "0.0",
-                "category_id": cat_map.get(s["category"], "1000"),
-                "last_modified": "0",
-                "tmdb_id": str(s.get("tmdb_id") or s["id"])
-            })
-
-        return jsonify(result)
-
-    # Series Info
-    if action == "get_series_info":
-        try:
-            series_id = int(request.args.get("series_id", 0))
-        except:
-            return jsonify({"info": {}, "episodes": {}, "seasons": []})
-
-        series_list = load_series()
-        for s in series_list:
-            if s.get("id") == series_id:
-                episodes_by_season = {}
-
-                for season in s.get("seasons", []):
-                    season_num = str(season.get("season", 1))
-                    eps = []
-
-                    for ep in season.get("episodes", []):
-                        ep_id = ep.get("id")
-                        thumb = ep.get("thumbnail", "")
-
-                        eps.append({
-                            "id": str(ep_id),
-                            "episode_num": ep["episode"],
-                            "title": ep["title"],
-                            "name": ep["title"],
-                            "container_extension": "mp4",
-                            "info": {
-                                "name": ep["title"],
-                                "overview": ep.get("plot", ""),
-                                "plot": ep.get("plot", ""),
-                                "movie_image": thumb,
-                                "cover": thumb
-                            },
-                            "custom_sid": str(ep_id),
-                            "season": season_num,
-                            "direct_source": ""
-                        })
-
-                    episodes_by_season[season_num] = eps
-
-                genre_str = ", ".join(s["genre"]) if isinstance(s["genre"], list) else ""
-                cast_str = ", ".join(s["cast"]) if isinstance(s["cast"], list) else ""
-
-                return jsonify({
-                    "seasons": [{"season_number": int(sn), "name": f"Season {sn}", "episode_count": len(eps)} 
-                               for sn, eps in episodes_by_season.items()],
-                    "info": {
-                        "name": s["title"],
-                        "cover": s["cover"],
-                        "cover_big": s["banner"],
-                        "backdrop_path": [s["banner"]] if s["banner"] else [],
-                        "plot": s["plot"],
-                        "overview": s["plot"],
-                        "cast": cast_str,
-                        "director": s.get("director", ""),
-                        "genre": genre_str,
                         "releaseDate": s["year"],
                         "year": s["year"],
                         "rating": s["rating"],
@@ -731,6 +666,26 @@ def player_api():
         return jsonify(result)
 
     return jsonify([])
+
+# ================== RELOAD ENDPOINT ==================
+@app.route("/api/reload")
+def reload_sources():
+    """Reload sources from configuration files"""
+    global MOVIE_SOURCES, SERIES_SOURCES, CHANNEL_SOURCES
+    
+    MOVIE_SOURCES, SERIES_SOURCES, CHANNEL_SOURCES = load_sources_from_config()
+    
+    # Clear caches to force reload
+    load_movies.cache_clear()
+    load_series.cache_clear()
+    load_channels.cache_clear()
+    
+    return jsonify({
+        "status": "success",
+        "movies": len(MOVIE_SOURCES),
+        "series": len(SERIES_SOURCES),
+        "channels": len(CHANNEL_SOURCES)
+    })
 
 # ================== M3U & HOME ==================
 @app.route("/api/export/m3u")
@@ -880,7 +835,8 @@ def index():
             <a href="/player_api.php?username=test&password=test&action=get_series_categories">Series Categories</a> | 
             <a href="/player_api.php?username=test&password=test&action=get_series">Series List</a> | 
             <a href="/player_api.php?username=test&password=test&action=get_live_categories">Live Categories</a> | 
-            <a href="/player_api.php?username=test&password=test&action=get_live_streams">Live Streams</a>
+            <a href="/player_api.php?username=test&password=test&action=get_live_streams">Live Streams</a> | 
+            <a href="/api/reload">Reload Sources</a>
         </p>
     </div>
 </body>
