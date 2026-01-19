@@ -619,6 +619,121 @@ def player_api():
                         "cast": cast_str,
                         "director": str(m["director"]),
                         "genre": genre_str,
+                        "releasedate": m["year"],
+                        "year": m["year"],
+                        "rating": str(m["rating"]),
+                        "duration": m.get("duration", ""),
+                        "country": m.get("country", "Morocco"),
+                        "tmdb_id": str(m.get("tmdb_id") or m["id"])
+                    },
+                    "movie_data": {
+                        "stream_id": m["id"],
+                        "name": m["title"],
+                        "container_extension": "mp4",
+                        "custom_sid": str(m["id"])
+                    }
+                })
+
+        return jsonify({"info": {}, "movie_data": {}})
+
+    # Series Categories
+    if action == "get_series_categories":
+        series_list = load_series()
+        unique_cats = sorted(set(s["category"] for s in series_list))
+        return jsonify([{"category_id": str(i + 1000), "category_name": cat, "parent_id": 0} 
+                       for i, cat in enumerate(unique_cats)])
+
+    # Series List
+    if action == "get_series":
+        series_list = load_series()
+        unique_cats = sorted(set(s["category"] for s in series_list))
+        cat_map = {cat: str(i + 1000) for i, cat in enumerate(unique_cats)}
+        result = []
+
+        for s in series_list:
+            genre_str = ", ".join(s["genre"]) if isinstance(s["genre"], list) else ""
+            cast_str = ", ".join(s["cast"]) if isinstance(s["cast"], list) else ""
+
+            result.append({
+                "series_id": s["id"],
+                "num": s["id"],
+                "name": s["title"],
+                "title": s["title"],
+                "cover": s["cover"],
+                "cover_big": s["banner"],
+                "backdrop_path": [s["banner"]] if s["banner"] else [],
+                "plot": s["plot"],
+                "overview": s["plot"],
+                "cast": cast_str,
+                "director": s.get("director", ""),
+                "genre": genre_str,
+                "releaseDate": s["year"],
+                "year": s["year"],
+                "rating": s["rating"],
+                "rating_5based": str(float(s["rating"]) / 2) if s["rating"] != "0" else "0.0",
+                "category_id": cat_map.get(s["category"], "1000"),
+                "last_modified": "0",
+                "tmdb_id": str(s.get("tmdb_id") or s["id"])
+            })
+
+        return jsonify(result)
+
+    # Series Info
+    if action == "get_series_info":
+        try:
+            series_id = int(request.args.get("series_id", 0))
+        except:
+            return jsonify({"info": {}, "episodes": {}, "seasons": []})
+
+        series_list = load_series()
+        for s in series_list:
+            if s.get("id") == series_id:
+                episodes_by_season = {}
+
+                for season in s.get("seasons", []):
+                    season_num = str(season.get("season", 1))
+                    eps = []
+
+                    for ep in season.get("episodes", []):
+                        ep_id = ep.get("id")
+                        thumb = ep.get("thumbnail", "")
+
+                        eps.append({
+                            "id": str(ep_id),
+                            "episode_num": ep["episode"],
+                            "title": ep["title"],
+                            "name": ep["title"],
+                            "container_extension": "mp4",
+                            "info": {
+                                "name": ep["title"],
+                                "overview": ep.get("plot", ""),
+                                "plot": ep.get("plot", ""),
+                                "movie_image": thumb,
+                                "cover": thumb
+                            },
+                            "custom_sid": str(ep_id),
+                            "season": season_num,
+                            "direct_source": ""
+                        })
+
+                    episodes_by_season[season_num] = eps
+
+                genre_str = ", ".join(s["genre"]) if isinstance(s["genre"], list) else ""
+                cast_str = ", ".join(s["cast"]) if isinstance(s["cast"], list) else ""
+
+                return jsonify({
+                    "seasons": [{"season_number": int(sn), "name": f"Season {sn}", "episode_count": len(eps)} 
+                               for sn, eps in episodes_by_season.items()],
+                    "info": {
+                        "name": s["title"],
+                        "cover": s["cover"],
+                        "cover_big": s["banner"],
+                        "backdrop_path": [s["banner"]] if s["banner"] else [],
+                        "plot": s["plot"],
+                        "overview": s["plot"],
+                        "cast": cast_str,
+                        "director": s.get("director", ""),
+                        "genre": genre_str,
                         "releaseDate": s["year"],
                         "year": s["year"],
                         "rating": s["rating"],
@@ -666,26 +781,6 @@ def player_api():
         return jsonify(result)
 
     return jsonify([])
-
-# ================== RELOAD ENDPOINT ==================
-@app.route("/api/reload")
-def reload_sources():
-    """Reload sources from configuration files"""
-    global MOVIE_SOURCES, SERIES_SOURCES, CHANNEL_SOURCES
-    
-    MOVIE_SOURCES, SERIES_SOURCES, CHANNEL_SOURCES = load_sources_from_config()
-    
-    # Clear caches to force reload
-    load_movies.cache_clear()
-    load_series.cache_clear()
-    load_channels.cache_clear()
-    
-    return jsonify({
-        "status": "success",
-        "movies": len(MOVIE_SOURCES),
-        "series": len(SERIES_SOURCES),
-        "channels": len(CHANNEL_SOURCES)
-    })
 
 # ================== M3U & HOME ==================
 @app.route("/api/export/m3u")
@@ -835,8 +930,7 @@ def index():
             <a href="/player_api.php?username=test&password=test&action=get_series_categories">Series Categories</a> | 
             <a href="/player_api.php?username=test&password=test&action=get_series">Series List</a> | 
             <a href="/player_api.php?username=test&password=test&action=get_live_categories">Live Categories</a> | 
-            <a href="/player_api.php?username=test&password=test&action=get_live_streams">Live Streams</a> | 
-            <a href="/api/reload">Reload Sources</a>
+            <a href="/player_api.php?username=test&password=test&action=get_live_streams">Live Streams</a>
         </p>
     </div>
 </body>
