@@ -69,39 +69,13 @@ def index():
 # ================== Application Entry Point ==================
 
 if __name__ == "__main__":
-    from config import USERS
-    from datetime import datetime
-    
     print("=" * 60)
-    print("🏔️  Forja VOD - IPTV Service Starting")
+    print("ðŸ”ï¸  Forja VOD - IPTV Service Starting")
     print("=" * 60)
     print(f"Server: http://{FLASK_HOST}:{FLASK_PORT}")
     print(f"API Endpoint: http://{FLASK_HOST}:{FLASK_PORT}/player_api.php")
-    print("=" * 60)
-    
-    # Display loaded users
-    print(f"\n👥 Loaded Users ({len(USERS)}):")
-    print("-" * 60)
-    
-    current_time = int(datetime.now().timestamp())
-    
-    for username, data in USERS.items():
-        exp_date = int(data.get("exp_date", 0))
-        status = "Active" if exp_date > current_time else "Expired"
-        days_left = max(0, (exp_date - current_time) // 86400)
-        
-        print(f"  • {username}")
-        print(f"    Password: {data.get('password')}")
-        print(f"    Type: {data.get('account_type', 'Standard')}")
-        print(f"    Max Connections: {data.get('max_connections')}")
-        print(f"    Status: {status}", end="")
-        if status == "Active":
-            print(f" ({days_left} days left)")
-        else:
-            print()
-        print(f"    Test URL: http://{FLASK_HOST}:{FLASK_PORT}/player_api.php?username={username}&password={data.get('password')}")
-        print()
-    
+    print(f"Username: {USERNAME}")
+    print(f"Password: {PASSWORD}")
     print("=" * 60)
     
     app.run(

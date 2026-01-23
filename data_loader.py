@@ -7,12 +7,10 @@ import requests
 import urllib3
 from functools import lru_cache
 from urllib.parse import quote
-from config import SOURCE_CONFIG_URLS, TMDB_API_KEY
+from config import SOURCE_CONFIG_URLS, TMDB_API_KEY, M3U_SOURCES
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-
-# ================== Helper Functions ==================
 
 def safe_strip(value):
     """Safely strip whitespace from strings"""
@@ -33,6 +31,13 @@ def get_category_from_source(source_dict, data=None):
     if data and isinstance(data, dict):
         if "Category" in data:
             return clean_category_name(data["Category"])
+    
+    if data and isinstance(data, list) and len(data) > 0:
+        first_item = data[0]
+        if isinstance(first_item, dict) and "Category" in first_item:
+            return clean_category_name(first_item["Category"])
+    
+    if data and isinstance(data, dict):
         if "channels" in data and isinstance(data["channels"], list) and len(data["channels"]) > 0:
             first_channel = data["channels"][0]
             if "category" in first_channel:
@@ -70,15 +75,12 @@ def normalize_genre(genre_value):
     return []
 
 
-# ================== Source Configuration ==================
-
 def load_sources_from_config():
     """Load source URLs from external configuration files"""
     movie_sources = []
     series_sources = []
     channel_sources = []
     
-    # Try JSON format first
     try:
         resp = requests.get(SOURCE_CONFIG_URLS["json"], timeout=20)
         resp.raise_for_status()
@@ -96,7 +98,6 @@ def load_sources_from_config():
     except Exception as e:
         print(f"[CONFIG] JSON load failed: {e}, trying TXT format...")
     
-    # Fallback to TXT format
     try:
         resp = requests.get(SOURCE_CONFIG_URLS["txt"], timeout=20)
         resp.raise_for_status()
@@ -135,11 +136,8 @@ def load_sources_from_config():
     return [], [], []
 
 
-# Load sources at module initialization
 MOVIE_SOURCES, SERIES_SOURCES, CHANNEL_SOURCES = load_sources_from_config()
 
-
-# ================== TMDb Integration ==================
 
 @lru_cache(maxsize=500)
 def fetch_tmdb_details(tmdb_id=None, title=None, is_movie=True):
@@ -164,7 +162,7 @@ def fetch_tmdb_details(tmdb_id=None, title=None, is_movie=True):
             if credits_resp.status == 200:
                 credits = json.loads(credits_resp.data.decode('utf-8'))
             
-            print(f"[TMDb] ✓ Fetched {media_type} {tmdb_id}: {details.get('title') or details.get('name')}")
+            print(f"[TMDb] Fetched {media_type} {tmdb_id}: {details.get('title') or details.get('name')}")
             
             return {
                 'tmdb_id': tmdb_id,
@@ -196,11 +194,11 @@ def fetch_tmdb_details(tmdb_id=None, title=None, is_movie=True):
         return None
 
 
-# ================== Data Loaders ==================
-
 @lru_cache(maxsize=1)
 def load_movies(_cache_key=None):
     """Load and process all movie data"""
+    from m3u_parser import load_m3u_movies
+    
     movies = []
     seen_ids = set()
 
@@ -239,6 +237,11 @@ def load_movies(_cache_key=None):
                 if movie_id in seen_ids:
                     continue
                 seen_ids.add(movie_id)
+
+                item_category = item.get("Category")
+                if item_category:
+                    item_category = clean_category_name(item_category)
+                final_category = item_category or category
 
                 title = safe_strip(item.get("Title") or item.get("Name") or "Untitled")
                 
@@ -309,8 +312,8 @@ def load_movies(_cache_key=None):
                         year = m.group(1)
 
                 genres = normalize_genre(info.get("Genres") or info.get("Genre"))
-                if not genres and category:
-                    genres = [category]
+                if not genres and final_category:
+                    genres = [final_category]
 
                 cast = clean_cast(info.get("Cast") or info.get("Actors"))
                 director = safe_strip(info.get("Director") or "Unknown")
@@ -329,12 +332,25 @@ def load_movies(_cache_key=None):
                     "duration": str(info.get("Duration") or ""),
                     "country": safe_strip(info.get("Country") or "Morocco"),
                     "url": stream_url,
-                    "category": category,
+                    "category": final_category,
                     "tmdb_id": tmdb_id
                 })
 
         except Exception as e:
             print(f"[MOVIES] Error loading source {source}: {e}")
+
+    try:
+        m3u_sources = M3U_SOURCES.get("movies", [])
+        if m3u_sources:
+            m3u_movies = load_m3u_movies(m3u_sources)
+            
+            for m3u_movie in m3u_movies:
+                movie_id = m3u_movie.get('id')
+                if movie_id not in seen_ids:
+                    movies.append(m3u_movie)
+                    seen_ids.add(movie_id)
+    except Exception as e:
+        print(f"[MOVIES] Error loading M3U sources: {e}")
 
     print(f"[MOVIES] Loaded {len(movies)} unique entries")
     return movies
@@ -343,6 +359,8 @@ def load_movies(_cache_key=None):
 @lru_cache(maxsize=1)
 def load_series(_cache_key=None):
     """Load and process all series data"""
+    from m3u_parser import load_m3u_series
+    
     series_list = []
     series_id_counter = 10000
     seen_titles = {}
@@ -507,6 +525,19 @@ def load_series(_cache_key=None):
         except Exception as e:
             print(f"[SERIES] Error loading source {source}: {e}")
 
+    try:
+        m3u_sources = M3U_SOURCES.get("series", [])
+        if m3u_sources:
+            m3u_series = load_m3u_series(m3u_sources)
+            
+            for m3u_show in m3u_series:
+                title = m3u_show.get('title')
+                if title not in seen_titles:
+                    series_list.append(m3u_show)
+                    seen_titles[title] = True
+    except Exception as e:
+        print(f"[SERIES] Error loading M3U sources: {e}")
+
     print(f"[SERIES] Loaded {len(series_list)} series")
     return series_list
 
@@ -514,8 +545,11 @@ def load_series(_cache_key=None):
 @lru_cache(maxsize=1)
 def load_channels(_cache_key=None):
     """Load and process all channel data"""
+    from m3u_parser import load_m3u_channels
+    
     channels = []
     channel_id_counter = 1
+    seen_ids = set()
 
     for source in CHANNEL_SOURCES:
         try:
@@ -543,22 +577,36 @@ def load_channels(_cache_key=None):
                 category = clean_category_name(raw_category)
 
                 ch_id = ch.get("id") or ch.get("stream_id") or channel_id_counter
-
-                channels.append({
-                    "id": ch_id,
-                    "name": name,
-                    "logo": logo,
-                    "url": stream_url,
-                    "category": category,
-                    "epg_channel_id": ch.get("epg_channel_id", ""),
-                    "added": ch.get("added", ""),
-                    "category_id": ch.get("category_id", "")
-                })
-
-                channel_id_counter += 1
+                
+                if ch_id not in seen_ids:
+                    channels.append({
+                        "id": ch_id,
+                        "name": name,
+                        "logo": logo,
+                        "url": stream_url,
+                        "category": category,
+                        "epg_channel_id": ch.get("epg_channel_id", ""),
+                        "added": ch.get("added", ""),
+                        "category_id": ch.get("category_id", "")
+                    })
+                    seen_ids.add(ch_id)
+                    channel_id_counter += 1
 
         except Exception as e:
             print(f"[CHANNELS] Error loading source {source}: {e}")
+
+    try:
+        m3u_sources = M3U_SOURCES.get("live", [])
+        if m3u_sources:
+            m3u_channels = load_m3u_channels(m3u_sources)
+            
+            for m3u_ch in m3u_channels:
+                ch_id = m3u_ch.get('id')
+                if ch_id not in seen_ids:
+                    channels.append(m3u_ch)
+                    seen_ids.add(ch_id)
+    except Exception as e:
+        print(f"[CHANNELS] Error loading M3U sources: {e}")
 
     print(f"[CHANNELS] Loaded {len(channels)} channels")
     return channels
