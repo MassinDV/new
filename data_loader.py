@@ -5,11 +5,19 @@ import os
 import re
 import requests
 import urllib3
-from functools import lru_cache
+import time
 from urllib.parse import quote
 from config import SOURCE_CONFIG_URLS, TMDB_API_KEY, M3U_SOURCES
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Cache control - store cache time and data
+_cache = {
+    'movies': {'data': None, 'timestamp': 0},
+    'series': {'data': None, 'timestamp': 0},
+    'channels': {'data': None, 'timestamp': 0}
+}
+CACHE_TTL = 60  # Cache for 60 seconds - adjust as needed
 
 
 def safe_strip(value):
@@ -136,12 +144,8 @@ def load_sources_from_config():
     return [], [], []
 
 
-MOVIE_SOURCES, SERIES_SOURCES, CHANNEL_SOURCES = load_sources_from_config()
-
-
-@lru_cache(maxsize=500)
 def fetch_tmdb_details(tmdb_id=None, title=None, is_movie=True):
-    """Fetch additional metadata from TMDb API"""
+    """Fetch additional metadata from TMDb API (removed caching)"""
     media_type = "movie" if is_movie else "tv"
     http = urllib3.PoolManager()
     
@@ -194,15 +198,54 @@ def fetch_tmdb_details(tmdb_id=None, title=None, is_movie=True):
         return None
 
 
-@lru_cache(maxsize=1)
-def load_movies(_cache_key=None):
-    """Load and process all movie data"""
+def is_cache_valid(cache_type):
+    """Check if cache is still valid"""
+    cache_entry = _cache.get(cache_type)
+    if not cache_entry or cache_entry['data'] is None:
+        return False
+    
+    current_time = time.time()
+    if current_time - cache_entry['timestamp'] > CACHE_TTL:
+        return False
+    
+    return True
+
+
+def set_cache(cache_type, data):
+    """Set cache with current timestamp"""
+    _cache[cache_type] = {
+        'data': data,
+        'timestamp': time.time()
+    }
+
+
+def clear_cache(cache_type=None):
+    """Clear cache for specific type or all types"""
+    if cache_type:
+        _cache[cache_type] = {'data': None, 'timestamp': 0}
+    else:
+        for key in _cache:
+            _cache[key] = {'data': None, 'timestamp': 0}
+
+
+def load_movies():
+    """Load and process all movie data with cache"""
+    # Check cache first
+    if is_cache_valid('movies'):
+        print("[MOVIES] Using cached data")
+        return _cache['movies']['data']
+    
+    print("[MOVIES] Loading fresh data...")
+    
     from m3u_parser import load_m3u_movies
+    
+    # Reload sources from config on each call
+    movie_sources, _, _ = load_sources_from_config()
     
     movies = []
     seen_ids = set()
 
-    for source in MOVIE_SOURCES:
+    for source in movie_sources:
         try:
             if source["type"] == "local":
                 if not os.path.exists(source["path"]):
@@ -353,19 +396,32 @@ def load_movies(_cache_key=None):
         print(f"[MOVIES] Error loading M3U sources: {e}")
 
     print(f"[MOVIES] Loaded {len(movies)} unique entries")
+    
+    # Cache the result
+    set_cache('movies', movies)
+    
     return movies
 
 
-@lru_cache(maxsize=1)
-def load_series(_cache_key=None):
-    """Load and process all series data"""
+def load_series():
+    """Load and process all series data with cache"""
+    # Check cache first
+    if is_cache_valid('series'):
+        print("[SERIES] Using cached data")
+        return _cache['series']['data']
+    
+    print("[SERIES] Loading fresh data...")
+    
     from m3u_parser import load_m3u_series
+    
+    # Reload sources from config on each call
+    _, series_sources, _ = load_sources_from_config()
     
     series_list = []
     series_id_counter = 10000
     seen_titles = {}
 
-    for source in SERIES_SOURCES:
+    for source in series_sources:
         try:
             if source["type"] == "local":
                 if not os.path.exists(source["path"]):
@@ -539,19 +595,32 @@ def load_series(_cache_key=None):
         print(f"[SERIES] Error loading M3U sources: {e}")
 
     print(f"[SERIES] Loaded {len(series_list)} series")
+    
+    # Cache the result
+    set_cache('series', series_list)
+    
     return series_list
 
 
-@lru_cache(maxsize=1)
-def load_channels(_cache_key=None):
-    """Load and process all channel data"""
+def load_channels():
+    """Load and process all channel data with cache"""
+    # Check cache first
+    if is_cache_valid('channels'):
+        print("[CHANNELS] Using cached data")
+        return _cache['channels']['data']
+    
+    print("[CHANNELS] Loading fresh data...")
+    
     from m3u_parser import load_m3u_channels
+    
+    # Reload sources from config on each call
+    _, _, channel_sources = load_sources_from_config()
     
     channels = []
     channel_id_counter = 1
     seen_ids = set()
 
-    for source in CHANNEL_SOURCES:
+    for source in channel_sources:
         try:
             if source["type"] == "local":
                 if not os.path.exists(source["path"]):
@@ -609,4 +678,8 @@ def load_channels(_cache_key=None):
         print(f"[CHANNELS] Error loading M3U sources: {e}")
 
     print(f"[CHANNELS] Loaded {len(channels)} channels")
+    
+    # Cache the result
+    set_cache('channels', channels)
+    
     return channels

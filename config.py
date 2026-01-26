@@ -47,6 +47,13 @@ USERNAME = "test"  # Default/legacy username
 PASSWORD = "test"  # Default/legacy password
 EXP_DATE = "2524608000"  # ~2050
 
+# ================== Cache Configuration ==================
+# Cache TTL in seconds - adjust based on your needs
+# 60 = 1 minute (good for testing/development)
+# 300 = 5 minutes (balanced)
+# 600 = 10 minutes (production)
+CACHE_TTL = 60  # Default 60 seconds
+
 # ================== TMDb API Configuration ==================
 TMDB_API_KEY = "d9ae1980a7b9c6f43cd97e95f8d464c5"
 

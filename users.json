@@ -1,0 +1,8 @@
+{
+  "massin": {
+    "password": "123456",
+    "exp_date": "1771934068",
+    "max_connections": 2,
+    "account_type": "Trial"
+  }
+}
